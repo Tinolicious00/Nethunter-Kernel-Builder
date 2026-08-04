@@ -23,13 +23,13 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Cache clang toolchain
+      - name: Cache Android NDK
         uses: actions/cache@v4
         with:
-          path: toolchains/clang
-          key: ${{ runner.os }}-clang-r487747c-v3
+          path: android-ndk-r26c
+          key: ${{ runner.os }}-ndk-r26c
           restore-keys: |
-            ${{ runner.os }}-clang-
+            ${{ runner.os }}-ndk-
 
       - name: Cache ccache
         uses: actions/cache@v4
@@ -52,19 +52,18 @@ jobs:
           git config --global user.name "NetHunterBuilder"
           git config --global user.email "builder@nethunter.local"
 
-      - name: Download AOSP Clang Toolchain
+      - name: Download Android NDK (if not cached)
         run: |
           set -euxo pipefail
-          mkdir -p toolchains/clang
-          cd toolchains/clang
-          if [ ! -x "bin/clang" ]; then
-            git init -q
-            git remote add origin https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86
-            git fetch --depth=1 origin refs/tags/clang-r487747c:refs/tags/clang-r487747c
-            git checkout clang-r487747c
+          if [ ! -d "android-ndk-r26c" ]; then
+            wget -q https://dl.google.com/android/repository/android-ndk-r26c-linux.zip
+            unzip -q android-ndk-r26c-linux.zip
+            rm android-ndk-r26c-linux.zip
           else
-            echo "Using cached clang toolchain"
+            echo "Using cached NDK"
           fi
+          # Ensure the toolchain binary is present
+          test -x android-ndk-r26c/toolchains/llvm/prebuilt/linux-x86_64/bin/clang
 
       - name: Clone Stable Pixel 6 Pro Kernel Source Tree
         run: |
@@ -105,7 +104,7 @@ jobs:
       - name: Compile Custom Kernel Binary
         working-directory: pixel-kernel
         env:
-          PATH: ${{ github.workspace }}/toolchains/clang/bin:$PATH
+          PATH: ${{ github.workspace }}/android-ndk-r26c/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
         run: |
           set -euxo pipefail
           mkdir -p $CCACHE_DIR
