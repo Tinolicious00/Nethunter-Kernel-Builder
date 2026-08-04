@@ -15,7 +15,6 @@ jobs:
     env:
       ARCH: arm64
       LLVM: "1"
-      # Use a consistent path that’s writable and survives steps
       CCACHE_DIR: /tmp/ccache
 
     steps:
@@ -28,7 +27,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: toolchains/clang
-          key: ${{ runner.os }}-clang-r487747c
+          key: ${{ runner.os }}-clang-r487747c-v2
           restore-keys: |
             ${{ runner.os }}-clang-
 
@@ -58,8 +57,15 @@ jobs:
           set -euxo pipefail
           mkdir -p toolchains
           if [ ! -x "toolchains/clang/bin/clang" ]; then
-            git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 toolchains/clang \
-              --depth=1 -b clang-r487747c
+            cd toolchains
+            TAG="clang-r487747c"
+            URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/${TAG}.tar.gz"
+            wget -q "$URL" -O clang.tar.gz
+            mkdir -p clang
+            tar xzf clang.tar.gz -C clang
+            rm clang.tar.gz
+            # Verify the binary exists
+            test -x clang/bin/clang
           else
             echo "Using cached clang toolchain"
           fi
@@ -72,7 +78,6 @@ jobs:
         working-directory: pixel-kernel
         run: |
           set -euxo pipefail
-          # Desired config fragment
           cat >../nethunter-config <<'EOF'
           CONFIG_CFG80211=y
           CONFIG_MAC80211=y
@@ -83,7 +88,6 @@ jobs:
           DEFCONFIG="arch/arm64/configs/gki_defconfig"
 
           if [ -f "$DEFCONFIG" ]; then
-            # Prefer kernel-provided merge_config.sh if available
             if [ -x scripts/kconfig/merge_config.sh ]; then
               echo "Merging config fragment using scripts/kconfig/merge_config.sh"
               scripts/kconfig/merge_config.sh $DEFCONFIG ../nethunter-config
@@ -108,12 +112,10 @@ jobs:
           PATH: ${{ github.workspace }}/toolchains/clang/bin:$PATH
         run: |
           set -euxo pipefail
-          # Create ccache directory explicitly
           mkdir -p $CCACHE_DIR
           export CC="ccache clang"
 
           mkdir -p out
-          # run defconfig and build, capturing logs
           make O=out gki_defconfig 2>&1 | tee ../build-gki_defconfig.log
           make -j"$(nproc)" O=out 2>&1 | tee ../build.log
 
@@ -125,7 +127,6 @@ jobs:
           if [ -f "pixel-kernel/out/arch/arm64/boot/Image.lz4" ]; then
             cp -v pixel-kernel/out/arch/arm64/boot/Image.lz4 flash_output/ || true
           fi
-          # save config and a compressed archive of the out directory for debugging
           if [ -f "pixel-kernel/out/.config" ]; then
             cp -v pixel-kernel/out/.config flash_output/ || true
           fi
