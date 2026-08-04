@@ -27,7 +27,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: toolchains/clang
-          key: ${{ runner.os }}-clang-r487747c-v2
+          key: ${{ runner.os }}-clang-r487747c-v3
           restore-keys: |
             ${{ runner.os }}-clang-
 
@@ -55,12 +55,12 @@ jobs:
       - name: Download AOSP Clang Toolchain
         run: |
           set -euxo pipefail
-          mkdir -p toolchains
-          if [ ! -x "toolchains/clang/bin/clang" ]; then
-            git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 toolchains/clang \
-              --depth=1 -b main
-            cd toolchains/clang
-            git fetch --tags origin clang-r487747c
+          mkdir -p toolchains/clang
+          cd toolchains/clang
+          if [ ! -x "bin/clang" ]; then
+            git init -q
+            git remote add origin https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86
+            git fetch --depth=1 origin refs/tags/clang-r487747c:refs/tags/clang-r487747c
             git checkout clang-r487747c
           else
             echo "Using cached clang toolchain"
