@@ -14,7 +14,6 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       ARCH: arm64
-      LLVM: "1"
       CCACHE_DIR: /tmp/ccache
 
     steps:
@@ -62,7 +61,6 @@ jobs:
           else
             echo "Using cached NDK"
           fi
-          # Ensure the toolchain binary is present
           test -x android-ndk-r26c/toolchains/llvm/prebuilt/linux-x86_64/bin/clang
 
       - name: Clone Stable Pixel 6 Pro Kernel Source Tree
@@ -105,6 +103,7 @@ jobs:
         working-directory: pixel-kernel
         env:
           PATH: ${{ github.workspace }}/android-ndk-r26c/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
+          LLVM: "1"
         run: |
           set -euxo pipefail
           mkdir -p $CCACHE_DIR
