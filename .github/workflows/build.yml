@@ -1,5 +1,9 @@
 name: Build Pixel 6 Pro NetHunter Kernel (Proton Compiler)
 
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [main, master]
@@ -8,18 +12,40 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    env:
+      ARCH: arm64
+      LLVM: "1"
+      CCACHE_DIR: ${{ runner.temp }}/ccache
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Cache clang toolchain
+        uses: actions/cache@v4
+        with:
+          path: toolchains/clang
+          key: ${{ runner.os }}-clang-r487747c
+          restore-keys: |
+            ${{ runner.os }}-clang-
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ runner.os }}-ccache-${{ hashFiles('**/Makefile') }}
 
       - name: Optimize Environment and Storage
         run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          set -euxo pipefail
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc || true
           sudo apt-get update
           sudo apt-get install -y \
             bc bison flex libssl-dev make git zip \
-            libelf-dev libxml2-utils lz4 python3 cpio
+            libelf-dev libxml2-utils lz4 python3 cpio ccache
+          sudo apt-get clean
 
       - name: Set Up Git Identity
         run: |
@@ -28,48 +54,91 @@ jobs:
 
       - name: Download AOSP Clang Toolchain
         run: |
-          mkdir -p toolchains/clang
-          cd toolchains/clang
-          wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r487747c.tar.gz -O clang.tar.gz
-          tar xzf clang.tar.gz
-          rm clang.tar.gz
+          set -euxo pipefail
+          mkdir -p toolchains
+          if [ ! -x "toolchains/clang/bin/clang" ]; then
+            git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 toolchains/clang \
+              --depth=1 -b clang-r487747c
+          else
+            echo "Using cached clang toolchain"
+          fi
 
       - name: Clone Stable Pixel 6 Pro Kernel Source Tree
         run: |
           git clone https://android.googlesource.com/kernel/common pixel-kernel --depth=1 -b android-mainline
 
-      - name: Apply NetHunter Kernel Configurations
+      - name: Apply NetHunter Kernel Configurations (safe merge)
         working-directory: pixel-kernel
         run: |
+          set -euxo pipefail
+          # Desired config fragment
+          cat >../nethunter-config <<'EOF'
+          CONFIG_CFG80211=y
+          CONFIG_MAC80211=y
+          CONFIG_USB_G_ANDROID=y
+          CONFIG_USB_F_HID=y
+          EOF
+
           DEFCONFIG="arch/arm64/configs/gki_defconfig"
+
           if [ -f "$DEFCONFIG" ]; then
-            echo "CONFIG_CFG80211=y" >> $DEFCONFIG
-            echo "CONFIG_MAC80211=y" >> $DEFCONFIG
-            echo "CONFIG_USB_G_ANDROID=y" >> $DEFCONFIG
-            echo "CONFIG_USB_F_HID=y" >> $DEFCONFIG
+            # Prefer kernel-provided merge_config.sh if available
+            if [ -x scripts/kconfig/merge_config.sh ]; then
+              echo "Merging config fragment using scripts/kconfig/merge_config.sh"
+              scripts/kconfig/merge_config.sh $DEFCONFIG ../nethunter-config
+            else
+              echo "No merge_config.sh found; appending only missing CONFIG entries"
+              while read -r line; do
+                key=$(echo "$line" | cut -d= -f1)
+                if ! grep -q "^$key" "$DEFCONFIG"; then
+                  echo "$line" >> "$DEFCONFIG"
+                else
+                  echo "$key already present, skipping"
+                fi
+              done < ../nethunter-config
+            fi
+          else
+            echo "Defconfig not found: $DEFCONFIG"
           fi
 
       - name: Compile Custom Kernel Binary
         working-directory: pixel-kernel
+        env:
+          PATH: ${{ github.workspace }}/toolchains/clang/bin:$PATH
         run: |
-          export PATH=$GITHUB_WORKSPACE/toolchains/clang/bin:$PATH
-          export ARCH=arm64
-          export LLVM=1
+          set -euxo pipefail
+          export CCACHE_DIR=${{ env.CCACHE_DIR }}
+          export CC="ccache clang"
 
-          make O=out gki_defconfig
-          make -j"$(nproc)" O=out
+          mkdir -p out
+          # run defconfig and build, capturing logs
+          make O=out gki_defconfig 2>&1 | tee ../build-gki_defconfig.log
+          make -j"$(nproc)" O=out 2>&1 | tee ../build.log
 
       - name: Package Output Binaries
         if: always()
         run: |
+          set -euxo pipefail
           mkdir -p flash_output
           if [ -f "pixel-kernel/out/arch/arm64/boot/Image.lz4" ]; then
             cp -v pixel-kernel/out/arch/arm64/boot/Image.lz4 flash_output/ || true
           fi
+          # save config and a compressed archive of the out directory for debugging
+          if [ -f "pixel-kernel/out/.config" ]; then
+            cp -v pixel-kernel/out/.config flash_output/ || true
+          fi
+          if [ -d "pixel-kernel/out" ]; then
+            tar -C pixel-kernel -czf flash_output/out.tar.gz out || true
+          fi
 
-      - name: Upload Flashable NetHunter Kernel
-        if: success()
+      - name: Upload build logs & artifacts (always)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: Pixel6Pro-NetHunter-Kernel
-          path: flash_output/
+          path: |
+            flash_output/
+            build.log
+            build-gki_defconfig.log
+            pixel-kernel/out/
+          retention-days: 7
