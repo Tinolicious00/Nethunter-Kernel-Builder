@@ -43,7 +43,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             bc bison flex libssl-dev make git zip \
-            libelf-dev libxml2-utils lz4 python3 cpio ccache
+            libelf-dev libxml2-utils lz4 python3 cpio ccache \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
           sudo apt-get clean
 
       - name: Set Up Git Identity
