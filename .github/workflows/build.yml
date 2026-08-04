@@ -1,4 +1,4 @@
-name: Build Pixel 6 Pro NetHunter Kernel (AOSP Clang Baseline)
+name: Build Pixel 6 Pro NetHunter Kernel (AOSP Production Tag)
 
 on:
   push:
@@ -11,86 +11,63 @@ jobs:
 
     env:
       OUT_DIR: out
-      KERNEL_NAME: raven-nethunter
-      # Official AOSP common kernel source for Tensor GS101
-      KERNEL_REPO: https://googlesource.com
-      KERNEL_BRANCH: android-gs-raviole-6.1-android15
-      # Combined target file for Pixel 6 / 6 Pro
+      # Target release manifest tracking Android 15 for Pixel 6 series (Raviole)
+      MANIFEST_BRANCH: refs/tags/android-15.0.0_r0.20
       DEFCONFIG_NAME: raviole_defconfig
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Install build dependencies (64-bit AOSP Native)
+      - name: Install Google AOSP Build Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             bc bison flex libssl-dev make \
             git zip libelf-dev libxml2-utils \
-            lz4 python3 cpio
+            lz4 python3 cpio repo
 
-      - name: Download AOSP Prebuilt Clang Toolchain
+      - name: Set Up Git Credentials
         run: |
-          mkdir -p toolchains/clang
-          cd toolchains/clang
-          git clone https://googlesource.com --depth=1 -b main
-          cd ../..
-          mkdir -p toolchains/gcc64
-          cd toolchains/gcc64
-          git clone https://googlesource.com --depth=1 -b main
-          cd ../..
+          git config --global user.name "KernelBuilder"
+          git config --global user.email "builder@kernel.local"
 
-      - name: Clone Pixel 6 Pro kernel source
+      - name: Initialize and Sync Pixel Kernel Source Tree
         run: |
-          git clone --recursive --branch "$KERNEL_BRANCH" \
-            "$KERNEL_REPO" "$KERNEL_NAME" --depth=1
+          mkdir pixel-source && cd pixel-source
+          # Pulls the official Google Pixel 6 Pro hardware compilation tree
+          repo init -u https://android.googlesource.com/kernel/manifest -b ${{ env.MANIFEST_BRANCH }} --depth=1
+          repo sync -c -j$(nproc) --no-tags --no-clone-bundle
 
-      - name: Inject NetHunter Driver Configurations
-        working-directory: ${{ env.KERNEL_NAME }}
+      - name: Inject NetHunter Kernel Flags
         run: |
-          # Automatically appends vital hardware hooks to the defconfig target file
-          echo "CONFIG_CFG80211=y" >> arch/arm64/configs/$DEFCONFIG_NAME
-          echo "CONFIG_MAC80211=y" >> arch/arm64/configs/$DEFCONFIG_NAME
-          echo "CONFIG_USB_G_ANDROID=y" >> arch/arm64/configs/$DEFCONFIG_NAME
-          echo "CONFIG_USB_F_HID=y" >> arch/arm64/configs/$DEFCONFIG_NAME
+          cd pixel-source/private/google-modules/soc/gs
+          # Appends essential NetHunter packet injection and BadUSB hooks to the configuration mapping
+          if [ -d "arch/arm64/configs" ]; then
+            echo "CONFIG_CFG80211=y" >> arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
+            echo "CONFIG_MAC80211=y" >> arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
+            echo "CONFIG_USB_G_ANDROID=y" >> arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
+            echo "CONFIG_USB_F_HID=y" >> arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
+          fi
 
-      - name: Build kernel (AArch64 / Clang)
-        id: kernel_build
-        working-directory: ${{ env.KERNEL_NAME }}
+      - name: Compile Pixel Kernel (Modern AOSP Kleaf/Bazel Toolchain)
         run: |
-          # Reconfigure paths to tap into the downloaded Google compilers
-          export CLANG_DIR=$GITHUB_WORKSPACE/toolchains/clang/clang-stable
-          export GCC_DIR=$GITHUB_WORKSPACE/toolchains/gcc64/bin
-          
-          export PATH=$CLANG_DIR/bin:$GCC_DIR:$PATH
-          
-          export ARCH=arm64
-          export SUBARCH=arm64
-          export CC=clang
-          export CLANG_TRIPLE=aarch64-linux-gnu-
-          export CROSS_COMPILE=aarch64-linux-android-
-          export ANDROID_MAJOR_VERSION=15
+          cd pixel-source
+          # Uses Google's integrated hermetic building engine required for Android 15
+          tools/bazel run //private/google-modules/soc/gs:raviole_dist -- --dist_dir=$GITHUB_WORKSPACE/out_dist
 
-          mkdir -p "$OUT_DIR"
-
-          echo "=== Running defconfig: $DEFCONFIG_NAME ==="
-          make O="$OUT_DIR" "$DEFCONFIG_NAME"
-
-          echo "=== Building kernel ==="
-          make -j"$(nproc)" O="$OUT_DIR"
-
-      - name: Collect artifacts
+      - name: Collect and Package Artifacts
         if: always()
         run: |
-          mkdir -p artifacts
-          # Modern 64-bit Pixel kernels package inside a compressed Image.lz4 output
-          cp -v $KERNEL_NAME/$OUT_DIR/arch/arm64/boot/Image.lz4 artifacts/ || true
-          cp -v $KERNEL_NAME/$OUT_DIR/arch/arm64/boot/dtb artifacts/ || true
+          mkdir -p final_artifacts
+          if [ -d "out_dist" ]; then
+            cp -v out_dist/Image.lz4 final_artifacts/ || true
+            cp -v out_dist/*.dtb final_artifacts/ || true
+          fi
 
-      - name: Upload finished compilation
+      - name: Upload Flashable NetHunter Output
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Pixel6Pro-NetHunter-Kernel
-          path: artifacts/
+          name: Pixel6Pro-Android15-NetHunterKernel
+          path: final_artifacts/
