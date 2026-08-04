@@ -57,15 +57,11 @@ jobs:
           set -euxo pipefail
           mkdir -p toolchains
           if [ ! -x "toolchains/clang/bin/clang" ]; then
-            cd toolchains
-            TAG="clang-r487747c"
-            URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/${TAG}.tar.gz"
-            wget -q "$URL" -O clang.tar.gz
-            mkdir -p clang
-            tar xzf clang.tar.gz -C clang
-            rm clang.tar.gz
-            # Verify the binary exists
-            test -x clang/bin/clang
+            git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 toolchains/clang \
+              --depth=1 -b main
+            cd toolchains/clang
+            git fetch --tags origin clang-r487747c
+            git checkout clang-r487747c
           else
             echo "Using cached clang toolchain"
           fi
@@ -114,7 +110,6 @@ jobs:
           set -euxo pipefail
           mkdir -p $CCACHE_DIR
           export CC="ccache clang"
-
           mkdir -p out
           make O=out gki_defconfig 2>&1 | tee ../build-gki_defconfig.log
           make -j"$(nproc)" O=out 2>&1 | tee ../build.log
