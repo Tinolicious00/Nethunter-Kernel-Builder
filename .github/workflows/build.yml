@@ -28,12 +28,10 @@ jobs:
 
       - name: Download Proton Clang Toolchain
         run: |
-          # Clones a unified, pre-packaged compiler designed for Android 64-bit kernels
           git clone https://github.com toolchains/clang --depth=1
 
       - name: Clone Stable Pixel 6 Pro Kernel Source Tree
         run: |
-          # Pulls the main AOSP common kernel tree branch
           git clone https://googlesource.com pixel-kernel --depth=1 -b android-mainline
 
       - name: Apply NetHunter Kernel Configurations
@@ -50,7 +48,6 @@ jobs:
       - name: Compile Custom Kernel Binary
         working-directory: pixel-kernel
         run: |
-          # Maps compiler paths directly into the Proton Clang directory
           export PATH=$GITHUB_WORKSPACE/toolchains/clang/bin:$PATH
           export ARCH=arm64
           export SUBARCH=arm64
@@ -58,10 +55,7 @@ jobs:
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
 
-          # 1. Initialize the patched layout mapping
           make O=out gki_defconfig
-          
-          # 2. Compile the kernel files
           make -j"$(nproc)" O=out
 
       - name: Package Output Binaries
