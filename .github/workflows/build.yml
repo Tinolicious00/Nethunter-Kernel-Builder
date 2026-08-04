@@ -26,9 +26,13 @@ jobs:
           git config --global user.name "NetHunterBuilder"
           git config --global user.email "builder@nethunter.local"
 
-      - name: Download Proton Clang Toolchain
+      - name: Download AOSP Clang Toolchain
         run: |
-          git clone https://github.com/kdrag0n/proton-clang toolchains/clang --depth=1
+          mkdir -p toolchains/clang
+          cd toolchains/clang
+          wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r487747c.tar.gz -O clang.tar.gz
+          tar xzf clang.tar.gz
+          rm clang.tar.gz
 
       - name: Clone Stable Pixel 6 Pro Kernel Source Tree
         run: |
