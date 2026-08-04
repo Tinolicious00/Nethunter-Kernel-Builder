@@ -1,4 +1,4 @@
-name: Build Pixel 6 Pro NetHunter Kernel (AOSP Production Tag)
+name: Build Pixel 6 Pro NetHunter Kernel (AK3 Native Engine)
 
 on:
   push:
@@ -9,65 +9,72 @@ jobs:
   build:
     runs-on: ubuntu-22.04
 
-    env:
-      OUT_DIR: out
-      # Target release manifest tracking Android 15 for Pixel 6 series (Raviole)
-      MANIFEST_BRANCH: refs/tags/android-15.0.0_r0.20
-      DEFCONFIG_NAME: raviole_defconfig
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Install Google AOSP Build Dependencies
+      - name: Optimize Environment and Storage
         run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
           sudo apt-get update
           sudo apt-get install -y \
-            bc bison flex libssl-dev make \
-            git zip libelf-dev libxml2-utils \
-            lz4 python3 cpio repo
+            bc bison flex libssl-dev make git zip \
+            libelf-dev libxml2-utils lz4 python3 cpio
 
-      - name: Set Up Git Credentials
+      - name: Set Up Git Identity
         run: |
-          git config --global user.name "KernelBuilder"
-          git config --global user.email "builder@kernel.local"
+          git config --global user.name "NetHunterBuilder"
+          git config --global user.email "builder@nethunter.local"
 
-      - name: Initialize and Sync Pixel Kernel Source Tree
+      - name: Fetch Google Android 15 Clang Compilers
         run: |
-          mkdir pixel-source && cd pixel-source
-          # Pulls the official Google Pixel 6 Pro hardware compilation tree
-          repo init -u https://android.googlesource.com/kernel/manifest -b ${{ env.MANIFEST_BRANCH }} --depth=1
-          repo sync -c -j$(nproc) --no-tags --no-clone-bundle
+          mkdir -p toolchains/clang
+          git clone https://googlesource.com toolchains/clang --depth=1 -b main
 
-      - name: Inject NetHunter Kernel Flags
+      - name: Clone Stable Pixel 6 Pro Kernel Source Tree
         run: |
-          cd pixel-source/private/google-modules/soc/gs
-          # Appends essential NetHunter packet injection and BadUSB hooks to the configuration mapping
-          if [ -d "arch/arm64/configs" ]; then
-            echo "CONFIG_CFG80211=y" >> arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
-            echo "CONFIG_MAC80211=y" >> arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
-            echo "CONFIG_USB_G_ANDROID=y" >> arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
-            echo "CONFIG_USB_F_HID=y" >> arch/arm64/configs/${{ env.DEFCONFIG_NAME }}
+          # Pulls the production-ready Pixel 6 series branch matching Android 15 GKI
+          git clone https://googlesource.com pixel-kernel --depth=1 -b android-mainline
+
+      - name: Apply NetHunter Kernel Configurations
+        working-directory: pixel-kernel
+        run: |
+          # Targets the base architecture mapping file before building
+          DEFCONFIG="arch/arm64/configs/gki_defconfig"
+          if [ -f "$DEFCONFIG" ]; then
+            echo "CONFIG_CFG80211=y" >> $DEFCONFIG
+            echo "CONFIG_MAC80211=y" >> $DEFCONFIG
+            echo "CONFIG_USB_G_ANDROID=y" >> $DEFCONFIG
+            echo "CONFIG_USB_F_HID=y" >> $DEFCONFIG
           fi
 
-      - name: Compile Pixel Kernel (Modern AOSP Kleaf/Bazel Toolchain)
+      - name: Compile Custom Kernel Binary
+        working-directory: pixel-kernel
         run: |
-          cd pixel-source
-          # Uses Google's integrated hermetic building engine required for Android 15
-          tools/bazel run //private/google-modules/soc/gs:raviole_dist -- --dist_dir=$GITHUB_WORKSPACE/out_dist
+          export PATH=$GITHUB_WORKSPACE/toolchains/clang/clang-stable/bin:$PATH
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CC=clang
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          export CROSS_COMPILE=aarch64-linux-android-
 
-      - name: Collect and Package Artifacts
+          # 1. Initialize the patched defconfig base setup
+          make O=out gki_defconfig
+          
+          # 2. Compile the full kernel infrastructure across all CPU cores
+          make -j"$(nproc)" O=out
+
+      - name: Package Output Binaries
         if: always()
         run: |
-          mkdir -p final_artifacts
-          if [ -d "out_dist" ]; then
-            cp -v out_dist/Image.lz4 final_artifacts/ || true
-            cp -v out_dist/*.dtb final_artifacts/ || true
+          mkdir -p flash_output
+          if [ -f "pixel-kernel/out/arch/arm64/boot/Image.lz4" ]; then
+            cp -v pixel-kernel/out/arch/arm64/boot/Image.lz4 flash_output/ || true
           fi
 
-      - name: Upload Flashable NetHunter Output
+      - name: Upload Flashable NetHunter Kernel
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Pixel6Pro-Android15-NetHunterKernel
-          path: final_artifacts/
+          name: Pixel6Pro-NetHunter-Kernel
+          path: flash_output/
