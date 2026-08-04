@@ -1,4 +1,4 @@
-name: Build Moto G6 Play (jeter) Kernel (Ubuntu-Native Baseline)
+name: Build Pixel 6 Pro NetHunter Kernel (AOSP Clang Baseline)
 
 on:
   push:
@@ -11,67 +11,86 @@ jobs:
 
     env:
       OUT_DIR: out
-      KERNEL_NAME: JeterNethunter
-      KERNEL_REPO: https://github.com/LineageOS/android_kernel_motorola_msm8937.git
-      KERNEL_BRANCH: lineage-18.1
-      # Baseline defconfig for stability; Phase 2 switches to jeter_defconfig
-      DEFCONFIG_NAME: msm8937-perf_defconfig
+      KERNEL_NAME: raven-nethunter
+      # Official AOSP common kernel source for Tensor GS101
+      KERNEL_REPO: https://googlesource.com
+      KERNEL_BRANCH: android-gs-raviole-6.1-android15
+      # Combined target file for Pixel 6 / 6 Pro
+      DEFCONFIG_NAME: raviole_defconfig
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Install build dependencies (Ubuntu-native)
+      - name: Install build dependencies (64-bit AOSP Native)
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             bc bison flex libssl-dev make \
-            gcc-arm-linux-gnueabi \
-            git zip
+            git zip libelf-dev libxml2-utils \
+            lz4 python3 cpio
 
-      - name: Clone kernel source
+      - name: Download AOSP Prebuilt Clang Toolchain
+        run: |
+          mkdir -p toolchains/clang
+          cd toolchains/clang
+          git clone https://googlesource.com --depth=1 -b main
+          cd ../..
+          mkdir -p toolchains/gcc64
+          cd toolchains/gcc64
+          git clone https://googlesource.com --depth=1 -b main
+          cd ../..
+
+      - name: Clone Pixel 6 Pro kernel source
         run: |
           git clone --recursive --branch "$KERNEL_BRANCH" \
             "$KERNEL_REPO" "$KERNEL_NAME" --depth=1
 
-      - name: Build kernel (verbose)
+      - name: Inject NetHunter Driver Configurations
+        working-directory: ${{ env.KERNEL_NAME }}
+        run: |
+          # Automatically appends vital hardware hooks to the defconfig target file
+          echo "CONFIG_CFG80211=y" >> arch/arm64/configs/$DEFCONFIG_NAME
+          echo "CONFIG_MAC80211=y" >> arch/arm64/configs/$DEFCONFIG_NAME
+          echo "CONFIG_USB_G_ANDROID=y" >> arch/arm64/configs/$DEFCONFIG_NAME
+          echo "CONFIG_USB_F_HID=y" >> arch/arm64/configs/$DEFCONFIG_NAME
+
+      - name: Build kernel (AArch64 / Clang)
         id: kernel_build
         working-directory: ${{ env.KERNEL_NAME }}
         run: |
-          export ARCH=arm
-          export SUBARCH=arm
-          export CROSS_COMPILE=arm-linux-gnueabi-
-          export ANDROID_MAJOR_VERSION=r
-          export HOSTCFLAGS="-fcommon"
-          export CFLAGS_KERNEL="-Wno-error=attribute-alias"
+          # Reconfigure paths to tap into the downloaded Google compilers
+          export CLANG_DIR=$GITHUB_WORKSPACE/toolchains/clang/clang-stable
+          export GCC_DIR=$GITHUB_WORKSPACE/toolchains/gcc64/bin
+          
+          export PATH=$CLANG_DIR/bin:$GCC_DIR:$PATH
+          
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CC=clang
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          export CROSS_COMPILE=aarch64-linux-android-
+          export ANDROID_MAJOR_VERSION=15
 
           mkdir -p "$OUT_DIR"
 
           echo "=== Running defconfig: $DEFCONFIG_NAME ==="
-          make O="$OUT_DIR" "$DEFCONFIG_NAME" V=1
+          make O="$OUT_DIR" "$DEFCONFIG_NAME"
 
           echo "=== Building kernel ==="
-          make -j"$(nproc)" O="$OUT_DIR" V=1
-
-      - name: Retry build on failure
-        if: failure() && steps.kernel_build.outcome == 'failure'
-        working-directory: ${{ env.KERNEL_NAME }}
-        run: |
-          echo "=== First attempt failed. Cleaning and retrying... ==="
-          make O="$OUT_DIR" clean
-          make O="$OUT_DIR" "$DEFCONFIG_NAME" V=1
-          make -j"$(nproc)" O="$OUT_DIR" V=1
+          make -j"$(nproc)" O="$OUT_DIR"
 
       - name: Collect artifacts
         if: always()
         run: |
           mkdir -p artifacts
-          cp -v $KERNEL_NAME/$OUT_DIR/arch/arm/boot/zImage artifacts/ || true
-          cp -vr $KERNEL_NAME/$OUT_DIR/arch/arm/boot/dts artifacts/dts || true
+          # Modern 64-bit Pixel kernels package inside a compressed Image.lz4 output
+          cp -v $KERNEL_NAME/$OUT_DIR/arch/arm64/boot/Image.lz4 artifacts/ || true
+          cp -v $KERNEL_NAME/$OUT_DIR/arch/arm64/boot/dtb artifacts/ || true
 
-      - name: Upload artifacts
-        if: always()
+      - name: Upload finished compilation
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: jeter-kernel-build
-          path: artifacts
+          name: Pixel6Pro-NetHunter-Kernel
+          path: artifacts/
