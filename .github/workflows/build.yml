@@ -28,11 +28,11 @@ jobs:
 
       - name: Download Proton Clang Toolchain
         run: |
-          git clone https://github.com toolchains/clang --depth=1
+          git clone https://github.com/kdrag0n/proton-clang toolchains/clang --depth=1
 
       - name: Clone Stable Pixel 6 Pro Kernel Source Tree
         run: |
-          git clone https://googlesource.com pixel-kernel --depth=1 -b android-mainline
+          git clone https://android.googlesource.com/kernel/common pixel-kernel --depth=1 -b android-mainline
 
       - name: Apply NetHunter Kernel Configurations
         working-directory: pixel-kernel
