@@ -15,7 +15,8 @@ jobs:
     env:
       ARCH: arm64
       LLVM: "1"
-      CCACHE_DIR: ${{ runner.temp }}/ccache
+      # Use a consistent path that’s writable and survives steps
+      CCACHE_DIR: /tmp/ccache
 
     steps:
       - name: Checkout repo
@@ -107,7 +108,8 @@ jobs:
           PATH: ${{ github.workspace }}/toolchains/clang/bin:$PATH
         run: |
           set -euxo pipefail
-          export CCACHE_DIR=${{ env.CCACHE_DIR }}
+          # Create ccache directory explicitly
+          mkdir -p $CCACHE_DIR
           export CC="ccache clang"
 
           mkdir -p out
