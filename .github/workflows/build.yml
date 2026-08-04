@@ -99,6 +99,9 @@ jobs:
             echo "Defconfig not found: $DEFCONFIG"
           fi
 
+          # Clean up any build artifacts left behind by merge_config.sh
+          make mrproper
+
       - name: Compile Custom Kernel Binary
         working-directory: pixel-kernel
         env:
