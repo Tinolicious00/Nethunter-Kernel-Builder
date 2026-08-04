@@ -1,4 +1,4 @@
-name: Build Pixel 6 Pro NetHunter Kernel (AK3 Native Engine)
+name: Build Pixel 6 Pro NetHunter Kernel (Proton Compiler)
 
 on:
   push:
@@ -26,20 +26,19 @@ jobs:
           git config --global user.name "NetHunterBuilder"
           git config --global user.email "builder@nethunter.local"
 
-      - name: Fetch Google Android 15 Clang Compilers
+      - name: Download Proton Clang Toolchain
         run: |
-          mkdir -p toolchains/clang
-          git clone https://googlesource.com toolchains/clang --depth=1 -b main
+          # Clones a unified, pre-packaged compiler designed for Android 64-bit kernels
+          git clone https://github.com toolchains/clang --depth=1
 
       - name: Clone Stable Pixel 6 Pro Kernel Source Tree
         run: |
-          # Pulls the production-ready Pixel 6 series branch matching Android 15 GKI
+          # Pulls the main AOSP common kernel tree branch
           git clone https://googlesource.com pixel-kernel --depth=1 -b android-mainline
 
       - name: Apply NetHunter Kernel Configurations
         working-directory: pixel-kernel
         run: |
-          # Targets the base architecture mapping file before building
           DEFCONFIG="arch/arm64/configs/gki_defconfig"
           if [ -f "$DEFCONFIG" ]; then
             echo "CONFIG_CFG80211=y" >> $DEFCONFIG
@@ -51,17 +50,18 @@ jobs:
       - name: Compile Custom Kernel Binary
         working-directory: pixel-kernel
         run: |
-          export PATH=$GITHUB_WORKSPACE/toolchains/clang/clang-stable/bin:$PATH
+          # Maps compiler paths directly into the Proton Clang directory
+          export PATH=$GITHUB_WORKSPACE/toolchains/clang/bin:$PATH
           export ARCH=arm64
           export SUBARCH=arm64
           export CC=clang
-          export CLANG_TRIPLE=aarch64-linux-gnu-
-          export CROSS_COMPILE=aarch64-linux-android-
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
 
-          # 1. Initialize the patched defconfig base setup
+          # 1. Initialize the patched layout mapping
           make O=out gki_defconfig
           
-          # 2. Compile the full kernel infrastructure across all CPU cores
+          # 2. Compile the kernel files
           make -j"$(nproc)" O=out
 
       - name: Package Output Binaries
