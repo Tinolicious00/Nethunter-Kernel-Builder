@@ -102,10 +102,10 @@ jobs:
       - name: Compile Custom Kernel Binary
         working-directory: pixel-kernel
         env:
-          PATH: ${{ github.workspace }}/android-ndk-r26c/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
           LLVM: "1"
         run: |
           set -euxo pipefail
+          export PATH=${{ github.workspace }}/android-ndk-r26c/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
           mkdir -p $CCACHE_DIR
           export CC="ccache clang"
           mkdir -p out
